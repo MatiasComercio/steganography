@@ -1,11 +1,17 @@
-package ar.edu.itba.cryptography;
+package ar.edu.itba.cryptography.services;
 
-import static ar.edu.itba.cryptography.BMPUtils.BMP_OFFSET.*;
+import static ar.edu.itba.cryptography.services.BMPService.BMP_OFFSET.*;
 
 /**
  * Reference: http://www.fileformat.info/format/bmp/corion.htm
  */
-final class BMPUtils {
+public final class BMPService {
+
+  /**
+   * The minimum header size. It should allow to read the size of the complete file,
+   * for retrieving secret purposes
+   */
+  public static final int MIN_HEADER_SIZE = RESERVED.position;
 
   private static final int BMP_ID = 0x4D42;
 
@@ -30,6 +36,10 @@ final class BMPUtils {
     ID(0x0000),
     SIZE(0x0002),
     RESERVED(0x0006),
+    // the following two are for our own purposes
+    SEED(0x0006),
+    SHADOW_NUMBER(0x0008),
+    // -------------------------------------
     BITMAP_OFFSET(0x000A),
     HOR_WIDTH_PIXELS(0x0012),
     VER_WIDTH_PIXELS(0x0016),
@@ -42,37 +52,45 @@ final class BMPUtils {
     }
   }
 
-  static boolean isBMPFile(final byte[] image) {
+  public static boolean isBMPFile(final byte[] image) {
     // 0x4D42 represent BM backwards because of the way the value is retrieved
     return getValue(image, ID, BYTES.WORD) == BMP_ID;
   }
 
-  static int getBitmapSize(final byte[] image) {
+  public static int getBitmapSize(final byte[] image) {
     return getValue(image, SIZE, BYTES.DWORD);
   }
 
-  static int getBitmapOffset(final byte[] image) {
+  public static int getBitmapOffset(final byte[] image) {
     return getValue(image, BITMAP_OFFSET, BYTES.DWORD);
   }
 
-  static int getHorizontalWidthInPixels(final byte[] image) {
+  public static int getHorizontalWidthInPixels(final byte[] image) {
     return getValue(image, HOR_WIDTH_PIXELS, BYTES.DWORD);
   }
 
-  static int getVerticalWidthInPixels(final byte[] image) {
+  public static int getVerticalWidthInPixels(final byte[] image) {
     return getValue(image, VER_WIDTH_PIXELS, BYTES.DWORD);
   }
 
-  static int getBitsPerPixel(final byte[] image) {
+  public static int getBitsPerPixel(final byte[] image) {
     return getValue(image, BITS_PER_PIXEL, BYTES.DWORD);
   }
 
-  static void saveSeed(final byte[] image, final char seed) {
-    putValue(image, seed, BMP_OFFSET.RESERVED, BYTES.WORD);
+  public static void saveSeed(final byte[] image, final char seed) {
+    putValue(image, seed, BMP_OFFSET.SEED, BYTES.WORD);
   }
 
-  static char recoverSeed(final byte[] image) {
-    return (char) getValue(image, BMP_OFFSET.RESERVED, BYTES.WORD);
+  public static char recoverSeed(final byte[] image) {
+    return (char) getValue(image, BMP_OFFSET.SEED, BYTES.WORD);
+  }
+
+  public static void saveShadowNumber(final byte[] image, final char seed) {
+    putValue(image, seed, BMP_OFFSET.SHADOW_NUMBER, BYTES.WORD);
+  }
+
+  public static char recoverShadowNumber(final byte[] image) {
+    return (char) getValue(image, BMP_OFFSET.SHADOW_NUMBER, BYTES.WORD);
   }
 
   /**

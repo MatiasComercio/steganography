@@ -8,7 +8,7 @@ public class HelpProgram implements MainProgram {
   // System independent new line character
   private static final String NL = System.lineSeparator();
   private static final String HELP_TEXT =
-    "Skyscraper Game Solver.\n" +
+    "Steganography: share a .bmp secret among other .bmp files.\n" +
     "Arguments: \n" +
     "* -h : `help` that prints all available commands" + NL +
     "* " + DISTRIBUTION_PROGRAM.getDescription() + " " + SECRET.getDescription() + " "
@@ -33,7 +33,9 @@ public class HelpProgram implements MainProgram {
     "       secret image, in a (k, n)-threshold scheme." + NL +
     "     - " + IMAGES_DIR.getDescription() + ": OPTIONAL: the directory of the shadow  " + NL +
     "       images containing the secret. If not specified, the program " + NL +
-    "       will look those images in the current working directory." + NL;
+    "       will look those images in the current working directory." + NL +
+    "       It is important to note that the program will look for exactly k images; " + NL +
+    "       if more or less images are found, program will abort with an error." + NL;
 
   @Override
   public void run() {
