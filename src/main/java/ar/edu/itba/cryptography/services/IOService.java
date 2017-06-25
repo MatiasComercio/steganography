@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +28,14 @@ public class IOService {
   private static final Map<Path, BufferedWriter> outputFiles = new HashMap<>();
   private static final Map<Path, Stream<String>> inputFiles = new HashMap<>();
 
+  public static void writeByteArrayToFile(final Path pathToOutput, final byte[] bytes) {
+    try {
+      FileUtils.writeByteArrayToFile(pathToOutput.toFile(), bytes);
+    } catch (IOException e) {
+      exit(WRITE_FILE_ERROR, e);
+    }
+  }
+
   // Exit Codes
   public enum ExitStatus {
     NO_ARGS(-1,
@@ -39,7 +48,9 @@ public class IOService {
     NUMBER_EXPECTED(-4,
         "[FAIL] - Argument must be a number: {}",
         "[FAIL] - Invalid argument. Try 'help' for more information." + ABORTING),
-    NOT_A_FILE(-5, "", ""),
+    BAD_FILE_DATA(-5,
+        "[FAIL] - File {} has mismatching information. size: {}, offset: {}, width: {}, height: {}",
+        "[FAIL] - File has mismatching information." + ABORTING),
     UNEXPECTED_ERROR(-6,
         "[FAIL] - An unexpected error has occurred. Caused by: ",
         "[FAIL] - An unexpected error has occurred." + ABORTING),
@@ -58,6 +69,11 @@ public class IOService {
     WRITE_FILE_ERROR(-11,
         "[FAIL] - An unexpected IO Exception occurred while writing the file. Caused by: ",
         "[FAIL] -  An unexpected IO Exception occurred while writing a file." + CHECK_LOGS),
+    K8_MISMATCHING_SIZE(-12,
+        "[FAIL] - There is a shadow file that has not the same dimensions (width or height)"
+            + " of the secret file. Shadow path: {}",
+        "[FAIL] - There is a shadow file that has not the same dimensions (width or height)"
+            + " of the secret file." + ABORTING),
     COULD_NOT_OPEN_OUTPUT_FILE(-13,
         "[FAIL] - Could not open output file: {}",
         "[FAIL] - Could not open an output file." + ABORTING),
@@ -203,7 +219,7 @@ public class IOService {
    * @param data data to be saved on the new file
    * @return the path to the just created file
    */
-  public static Path createFile(final Path pathToFile, final String data) {
+  private static Path createFile(final Path pathToFile, final String data) {
     final Path destFolder = pathToFile.normalize().getParent();
     if (destFolder != null) {
       final File dataFolder = new File(destFolder.toString());
@@ -360,9 +376,12 @@ public class IOService {
     }
   }
 
-
   public static Stream<String> readLines(final Path filePath) {
     return inputFiles.get(filePath);
+  }
+
+  public static void print(final String s) {
+    System.out.println(s);
   }
 
   // private methods

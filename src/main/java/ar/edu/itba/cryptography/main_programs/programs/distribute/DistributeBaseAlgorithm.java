@@ -11,9 +11,9 @@ import ar.edu.itba.cryptography.services.BMPIOService;
 import ar.edu.itba.cryptography.services.IOService;
 import java.nio.file.Path;
 import java.util.List;
-import org.apache.commons.lang3.ArrayUtils;
 
 public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
+  private static final int SHADOW_BYTES_PER_SECRET_BYTE = 8;
   private static final int FIRST_ELEM_INDEX = 0;
   private static final int MODULUS = 257;
 
@@ -32,12 +32,8 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
     // Note: 'obf' stands for 'obfuscated'
     // Get the secret bytes
     final byte[] data = getSecretBytes(bmpIOService, pathToSecret);
-    // Validate (with exit code error, if any) the given k according to the data size
-    if (data.length < k ||  data.length % k != 0) {
-      IOService.exit(VALIDATION_FAILED, "It should happen that secret.length >= k "
-          + "&& secret.length % k == 0. Current values: secret.length = " + data.length + "; k = ");
-      throw new IllegalStateException(); // Should never reach here
-    }
+    // Validate all parameter (with exit code error, if any) according to the given secret data
+    validateParameters(bmpIOService, pathsToShadows, k, data, pathToSecret);
     // Generate a seed for the obfuscation
     final char seed = ObfuscatorHelper.generateSeed();
     // Obfuscate the data bytes using the generated seed
@@ -49,6 +45,32 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
     distributeData(bmpIOService, obfData, pathsToShadows, matrixA, k, MODULUS);
     // Save the seed and persist the updated data (seed + shadowNumber + secretBytes) in all shadows
     saveSeedAndOverwriteShadows(bmpIOService, pathsToShadows, seed);
+  }
+
+  /* package-private */ void validateParameters(final BMPIOService bmpIOService,
+      final List<Path> pathsToShadows, final int k, final byte[] data,
+      final Path pathToSecret) {
+    final int length = data.length;
+    // Validate that the secret data length can be divided into chunks of size k
+    if (length < k ||  length % k != 0) {
+      IOService.exit(VALIDATION_FAILED, "It should happen that secret.length >= k "
+          + "&& secret.length % k == 0. Current values: secret.length = " + length + "; k = " + k);
+      throw new IllegalStateException(); // Should never reach here
+    }
+    // Validate that the secret data fits in each of the given shadows
+    for (final Path path : pathsToShadows) {
+      final int shadowDataSize = bmpIOService.getDataSize(path, OUTPUT);
+      if (!secretFitsInShadow(length, shadowDataSize, k)) {
+        IOService.exit(VALIDATION_FAILED, "It should happen that 'shadowDataSize >= secretSize * "
+            + SHADOW_BYTES_PER_SECRET_BYTE + " / k'. Current values: secretSize = " + length
+            + "; shadowDataSize = " + shadowDataSize + "; k = " + k);
+      }
+    }
+  }
+
+  private boolean secretFitsInShadow(final int secretSize, final int shadowDataSize,
+      final int k) {
+    return shadowDataSize >= secretSize * SHADOW_BYTES_PER_SECRET_BYTE / k;
   }
 
   private void saveSeedAndOverwriteShadows(final BMPIOService bmpIOService,
@@ -65,7 +87,7 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
     // Take chunks of k bytes from obfData to build and solve each polynomial, until all
     // obfData bytes have been distributed
     for (int distributedBytes = 0 ; distributedBytes < obfData.length ; distributedBytes += k) {
-      // Get the next k bytes in the order ak-1, ..., a1, a0 (see method comments)
+      // Get the next k bytes in the order a0, a1, ..., ak-1
       final byte[] arrayX = getNextKBytes(obfData, distributedBytes, k);
       // Resolve the polynomial for all shadow numbers, i.e., perform Ax = b = P([1,n]), with
       // n the max shadow number, taking int account the modulus arithmetic
@@ -92,7 +114,7 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
    * is taken over again, until the calculation does not produce overflow. <p>
    * IMPORTANT: this method directly modifies the arrayX
    * @param matrixA the n x k matrix
-   * @param arrayX the k x 1 array, with constants in the order [ak-1, ..., a0].
+   * @param arrayX the k x 1 array, with constants in the order [a0, ..., ak-1].
    *               Recall that it may be modified.
    * @param mod the modulus to be used during calculations
    * @return matrixA x arrayX' (mod n) with arrayX' being the original
@@ -112,10 +134,9 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
   }
 
   private void decrementFirstNonZeroElement(final byte[] arrayX) {
-    // As arrayX is [ak-1, ..., a0], we should be finding this non-zero element
-    // in the inverse order (from the end to the beginning) to strictly obey the paper algorithm
-    for (int i = arrayX.length-1 ; i >= 0 ; i--) {
-      if (arrayX[i] > 0) {
+    // As arrayX is [a0, ..., ak-1]
+    for (int i = 0; i < arrayX.length ; i++) {
+      if (ByteHelper.byteToUnsignedInt(arrayX[i]) > 0) {
         arrayX[i] -= ((byte) 1);
         return;
       }
@@ -128,10 +149,6 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
   private byte[] getNextKBytes(final byte[] obfData, final int distributedBytes, final int k) {
     final byte[] arrayX = new byte[k];
     System.arraycopy(obfData, distributedBytes, arrayX, FIRST_ELEM_INDEX, k);
-    // As the paper algorithm suggest us to use the order a0, a1, ... ak-1
-    // instead of ak-1, ..., a1, a0, and we are going to calculate matrixA x arrayX, we need
-    // to reverse the array order to strictly implement the paper algorithm
-    ArrayUtils.reverse(arrayX);
     return arrayX;
   }
 
@@ -164,8 +181,7 @@ public abstract class DistributeBaseAlgorithm implements DistributeAlgorithm {
       bmpIOService.setShadowNumber(path, OUTPUT, x); // set for retrieving purposes only
       bmpIOService.setPathMatrixRow(path, OUTPUT, row); // set for distribution purposes
       for (int col = 0 ; col < k ; col ++) {
-        matrix[row][col] =
-            ByteHelper.byteToUnsignedInt(MatrixHelper.calculateMatrixXTerm(x, k, col, modulus));
+        matrix[row][col] = MatrixHelper.getCoefficient(x, col, modulus);
       }
     }
     return matrix;

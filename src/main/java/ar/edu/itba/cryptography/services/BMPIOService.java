@@ -1,8 +1,10 @@
 package ar.edu.itba.cryptography.services;
 
+import static ar.edu.itba.cryptography.services.IOService.ExitStatus.BAD_FILE_DATA;
+import static ar.edu.itba.cryptography.services.IOService.ExitStatus.BAD_FILE_FORMAT;
+import static ar.edu.itba.cryptography.services.IOService.ExitStatus.VALIDATION_FAILED;
 import static ar.edu.itba.cryptography.services.IOService.exit;
 
-import ar.edu.itba.cryptography.helpers.ByteHelper;
 import ar.edu.itba.cryptography.services.IOService.ExitStatus;
 import java.io.IOException;
 import java.nio.file.FileSystems;
@@ -11,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,8 +29,9 @@ public class BMPIOService {
     INPUT, OUTPUT
   }
   private static final String CWD = System.getProperty("user.dir");
+  private static final int MAX_DIR_DEPTH = 1;
   private static final int FIRST_ELEM_INDEX = 0;
-  private static final String BMP_EXT = "glob:*.bmp";
+  private static final String BMP_EXT = "glob:**.bmp";
   private static final PathMatcher bmpExtMatcher = FileSystems.getDefault().getPathMatcher(BMP_EXT);
 
   private final Map<Path, BMPData> inputFiles;
@@ -40,13 +44,20 @@ public class BMPIOService {
 
   @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
   public List<Path> openBmpFilesFrom(final Optional<String> optionalDir,
-      final Optional<Integer> optionalN, final OpenMode mode) {
-    final List<Path> paths;
+      final Optional<Integer> optionalN, final OpenMode mode,
+      final Path secretPath) {
+    List<Path> paths;
     final String dir = optionalDir.orElse(CWD);
-    try (final Stream<Path> pathsStream = Files.walk(Paths.get(dir))) {
-      paths = pathsStream.filter(path -> Files.isRegularFile(path)
-          && bmpExtMatcher.matches(path)).collect(Collectors.toList());
-      loadPathsBasedOn(mode, optionalN, paths);
+    final Path fullSecretPath = secretPath == null ? null : Paths.get(dir, secretPath.toString());
+    try (final Stream<Path> pathsStream = Files.walk(Paths.get(dir), MAX_DIR_DEPTH)) {
+      paths = pathsStream.filter(path -> {
+        boolean rejected = false;
+        if (fullSecretPath != null) {
+          rejected = path.equals(fullSecretPath);
+        }
+        return Files.isRegularFile(path) && bmpExtMatcher.matches(path) && !rejected;
+      }).collect(Collectors.toList());
+      paths = loadPathsBasedOn(mode, optionalN, paths);
     } catch (final IOException e) {
       exit(ExitStatus.COULD_NOT_OPEN_INPUT_FILE, e);
       throw new IllegalStateException(); // Should never return from the above method
@@ -58,7 +69,7 @@ public class BMPIOService {
   public Path openBmpFile(final String filePathString, final OpenMode mode) {
     final Path pathToFile = Paths.get(filePathString);
     if (!bmpExtMatcher.matches(pathToFile)) {
-      exit(ExitStatus.BAD_FILE_FORMAT, pathToFile);
+      exit(BAD_FILE_FORMAT, pathToFile);
       throw new IllegalStateException(); // Should never return from the above method
     }
     final Map<Path, BMPData> map = chooseMapBasedOn(mode);
@@ -99,7 +110,7 @@ public class BMPIOService {
     return BMPService.recoverShadowNumber(chooseMapBasedOn(mode).get(path).getHeaderBytes());
   }
 
-  public byte getNextSecretByte(final Path path, final OpenMode mode) { // TODO: bad feeling
+  public byte getNextSecretByte(final Path path, final OpenMode mode) {
     // assuming path != null & path opened
     final BMPData bmpData = chooseMapBasedOn(mode).get(path);
     return BMPService.getValueInLSB(bmpData.getBmp(), bmpData.getNext8BytesOffset());
@@ -113,6 +124,9 @@ public class BMPIOService {
     return chooseMapBasedOn(mode).get(pathToSecret).getDataBytes();
   }
 
+  public int getDataSize(final Path path, final OpenMode mode) {
+    return chooseMapBasedOn(mode).get(path).getDataSize();
+  }
 
   public byte[] getBmp(final Path path, final OpenMode mode) {
     return chooseMapBasedOn(mode).get(path).getBmp();
@@ -133,30 +147,42 @@ public class BMPIOService {
 
   public void writeDataToDisk(final Path path, final OpenMode mode) {
     final byte[] bmp = chooseMapBasedOn(mode).get(path).getBmp();
-    IOService.createFile(path, ByteHelper.hexadecimalBytesToString(bmp));
+    IOService.writeByteArrayToFile(path, bmp);
   }
 
   // private methods
 
   @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
-  private void loadPathsBasedOn(final OpenMode mode, final Optional<Integer> optionalN,
+  private List<Path> loadPathsBasedOn(final OpenMode mode, final Optional<Integer> optionalN,
       final List<Path> paths) throws IOException {
     final Map<Path, BMPData> map = chooseMapBasedOn(mode);
     if (optionalN.isPresent()) {
       final int n = optionalN.get();
+      if (n > paths.size()) {
+        IOService.exit(VALIDATION_FAILED, "There are not enough shadow files in "
+            + "the specified directory");
+        throw new IllegalStateException(); // Should never return from the above method
+      }
+      final List<Path> inUsePaths = new LinkedList<>();
+      // Choose only n paths from all the ones found
       for (int i = 0 ; i < n ; i++) {
         final Path path = paths.get(i);
+        IOService.print("Using shadow file: " + path);
         map.put(path, createBmpData(path));
+        inUsePaths.add(path);
       }
+      return inUsePaths;
     } else {
+      // Use all paths found
       for (final Path path : paths) {
         map.put(path, createBmpData(path));
       }
+      return paths;
     }
   }
 
   private BMPData createBmpData(final Path path) throws IOException {
-    return new BMPData(Files.readAllBytes(path));
+    return BMPData.build(path, Files.readAllBytes(path));
   }
 
   private Map<Path, BMPData> chooseMapBasedOn(final OpenMode mode) {
@@ -171,8 +197,23 @@ public class BMPIOService {
     private int nextByte;
     private int matrixRow;
 
-    /* package-private */ BMPData(final byte[] bmp) {
-      // TODO: validate correct BMP format: bmp file header and size == offset + width * height
+    /* package-private */ static BMPData build(final Path path, final byte[] image) {
+      // validations before initialization
+      if (!BMPService.isBMPFile(image)) {
+        IOService.exit(BAD_FILE_FORMAT, path);
+      }
+      final int size = BMPService.getBitmapSize(image);
+      final int offset = BMPService.getBitmapOffset(image);
+      final int width = BMPService.getHorizontalWidthInPixels(image);
+      final int height = BMPService.getVerticalWidthInPixels(image);
+      if ((size - offset) != (width * height)) {
+        IOService.exit(BAD_FILE_DATA, new Object[] { path, size, offset, width, height});
+      }
+      // If here, all validations passed (recall `exit` aborts the program)
+      return new BMPData(image);
+    }
+
+    private BMPData(final byte[] bmp) {
       this.bmp = bmp;
       this.nextByte = BMPService.getBitmapOffset(bmp);
       this.matrixRow = 0;
@@ -222,6 +263,12 @@ public class BMPIOService {
 
     /* package-private */ void setSeed(final char seed) {
       BMPService.saveSeed(bmp, seed);
+    }
+
+    /* package-private */ int getDataSize() {
+      final int totalSize = BMPService.getBitmapSize(bmp);
+      final int offset = BMPService.getBitmapOffset(bmp);
+      return totalSize - offset;
     }
   }
 }

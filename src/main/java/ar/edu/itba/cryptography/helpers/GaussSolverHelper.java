@@ -116,14 +116,16 @@ public abstract class GaussSolverHelper {
       //   because of the previous checks
       final int mcm = lcmOf(matrix[diagonalIndex][diagonalIndex], matrix[row][diagonalIndex]);
       // We know that multiply will be exact as the mcm is multiple of the referenced matrix value
-      final int multiplier = - mcm / matrix[row][diagonalIndex];
+      final int diagonalMultiplier = mcm / matrix[diagonalIndex][diagonalIndex];
+      final int rowMultiplier = mcm / matrix[row][diagonalIndex];
       // This is the value on the column being made 0
       matrix[row][diagonalIndex] = 0;
       // We are not multiplying the reference row (i.e.: the one referenced by diagonalIndex)
       //   so as it can be used in the consecutive row indexed iteration calls
       for (int col = diagonalIndex + 1 ; col < cols ; col ++) {
-        matrix[row][col] += (multiplier * matrix[diagonalIndex][col]);
-        matrix[row][col] %= modulus;
+        matrix[row][col] = (matrix[row][col] * rowMultiplier -
+            diagonalMultiplier * matrix[diagonalIndex][col]);
+        matrix[row][col] = Math.floorMod(matrix[row][col], modulus);
       }
     }
   }
@@ -151,6 +153,7 @@ public abstract class GaussSolverHelper {
       // all zeros values by passing each value as a subtraction to the b term
       for (int aboveRow = diagonalI - 1 ; aboveRow >= 0 ; aboveRow --) {
         matrix[aboveRow][rows] -= (matrix[aboveRow][diagonalI] * x[diagonalI]);
+        matrix[aboveRow][rows] = Math.floorMod(matrix[aboveRow][rows], modulus);
       }
     }
     return x;
@@ -169,7 +172,7 @@ public abstract class GaussSolverHelper {
   private static int modDivision(final int a, final int b, final int n) {
     if (a >= n || a < 0) throw new IllegalArgumentException("a should be in range [0, n-1]");
     if (b >= n || b < 0) throw new IllegalArgumentException("b should be in range [0, n-1]");
-    if (n % b == 0) throw new IllegalArgumentException("b and n should be coprime");
+    if (b % n == 0) throw new IllegalArgumentException("b and n should be coprime");
     // Note that a == (a % n)
     for (int k = 0 ; k < n ; k ++) {
       if (((k * b) % n) == a) return k;

@@ -14,13 +14,17 @@ import ar.edu.itba.cryptography.interfaces.DistributeAlgorithm;
 import ar.edu.itba.cryptography.interfaces.MainProgram;
 import ar.edu.itba.cryptography.services.BMPIOService;
 import ar.edu.itba.cryptography.services.IOService;
+import java.nio.file.FileSystems;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 public class DistributeProgram implements MainProgram {
   private static final int STANDARD_K_VALUE = 8;
+  private static final int MAX_SHADOWS = Character.MAX_VALUE;
+  private static final int MIN_K_VALUE = 2;
 
   private final Path pathToSecret;
   private final int k;
@@ -46,17 +50,19 @@ public class DistributeProgram implements MainProgram {
     final Optional<Integer> n;
     if (nString != null) {
       n = Optional.of(IOService.parseAsInt(nString, N.getDescription()));
-      // TODO: validate that n <= char MAX_VALUE (as it needs to be saved in a 2 byte register)
     } else {
       n = Optional.empty();
     }
     final Optional<String> dir = Optional.ofNullable(dirString);
-    final List<Path> pathsToShadows = bmpIOService.openBmpFilesFrom(dir, n, OUTPUT);
-    if (n.isPresent() && n.get() != pathsToShadows.size()) {
-      IOService.exit(VALIDATION_FAILED, "n != pathsToShadows.size()");
-      throw new IllegalStateException(); // Should never return from the above method
+    // n validation is performed inside the `bmpIOService.openBmpFilesFrom` method
+    final List<Path> pathsToShadows = bmpIOService.openBmpFilesFrom(dir, n, OUTPUT, pathToInput);
+    final int nShadows = pathsToShadows.size();
+    if (nShadows > MAX_SHADOWS) {
+      IOService.exit(VALIDATION_FAILED, "#shadows <= " + MAX_SHADOWS + ". #shadows = " + nShadows);
     }
-    // TODO: validate that k <= (n || pathsToShadows.size())
+    if (k > nShadows || k < MIN_K_VALUE) {
+      IOService.exit(VALIDATION_FAILED, MIN_K_VALUE + " <= k <= #shadows. #shadows = " + nShadows);
+    }
     return new DistributeProgram(pathToInput, k, pathsToShadows, bmpIOService);
   }
 
